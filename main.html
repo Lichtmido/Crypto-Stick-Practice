@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>クリプトスティック練習アプリ</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background-color: #0b0f0c;
+            color: #00ff66;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #info-panel {
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-shadow: 0 0 5px #00ff66;
+        }
+        #timer {
+            color: #fff;
+            font-size: 1.6rem;
+            font-family: monospace;
+        }
+        #status-message {
+            height: 24px;
+            margin-top: 5px;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+        }
+        /* スマートフォン風外枠 */
+        #phone-container {
+            background-color: #1a1a1a;
+            border: 6px solid #333;
+            border-radius: 16px;
+            padding: 16px 12px;
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.9), inset 0 0 10px rgba(0,0,0,0.6);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        /* グリッドコンテナ (横18列、縦9行) */
+        #grid-container {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(18, 24px);
+            grid-template-rows: repeat(9, 24px);
+            gap: 0px; /* マス自体に枠線をつけるためgapを0に変更 */
+            background-color: #000;
+            padding: 3px;
+            border: 2px solid #222;
+            border-radius: 4px;
+        }
+        /* グリッドの各マス (薄いグリッド枠線を追加) */
+        .cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: #00ff66;
+            width: 24px;
+            height: 24px;
+            border: 1px solid #112214; /* 各マスを個別に囲む薄いグリッド線 */
+        }
+        /* プレイヤーが動かす枠（オーバーレイ） */
+        .player-frame {
+            position: absolute;
+            display: flex;
+            height: 24px;
+            pointer-events: none;
+            box-sizing: border-box;
+            z-index: 10;
+            transition: left 0.05s, top 0.05s;
+        }
+        .player-frame .frame-cell {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.85);
+        }
+        /* 文字列A (WASD) */
+        #frame-a {
+            border: 2px solid #00ff66;
+            box-shadow: 0 0 6px #00ff66;
+        }
+        #frame-a .frame-cell {
+            color: #00ff66;
+        }
+        /* 文字列B (矢印キー) */
+        #frame-b {
+            border: 2px solid #00ff66;
+            box-shadow: 0 0 6px #00ff66;
+        }
+        #frame-b .frame-cell {
+            color: #00ff66;
+        }
+        /* 確定済みの枠 */
+        .player-frame.locked {
+            opacity: 0.3;
+            box-shadow: none;
+        }
+        /* ヘルプ表示 */
+        #controls-guide {
+            margin-top: 15px;
+            color: #666;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info-panel">
+        <div id="timer">30.00s</div>
+        <div id="status-message">PRESS SPACE TO START</div>
+    </div>
+
+    <div id="phone-container">
+        <div id="grid-container">
+        </div>
+    </div>
+
+    <div id="controls-guide">
+        【文字列A】移動: W, A, S, D / 確定: Space<br>
+        【文字列B】移動: 矢印キー / 確定: Enter
+    </div>
+
+    <script>
+        // 定数定義
+        const COLS = 18;
+        const ROWS = 9;
+        const WORD_LEN = 5;
+        const CHARS = "0123456789ABCDEF";
+
+        // ゲーム状態変数
+        let gridData = [];
+        let timerInterval = null;
+        let shuffleInterval = null;
+        let timeLeft = 30.00;
+        let isPlaying = false;
+        let isWaitingStart = true;
+
+        // オーディオ文脈（音源用）
+        let audioCtx = null;
+
+        // オブジェクト定義（文字列A, B）
+        const pA = { id: 'frame-a', x: 0, y: 0, word: '', targetX: 0, targetY: 0, locked: false };
+        const pB = { id: 'frame-b', x: 0, y: 0, word: '', targetX: 0, targetY: 0, locked: false };
+
+        const gridContainer = document.getElementById('grid-container');
+        const timerDisplay = document.getElementById('timer');
+        const statusMessage = document.getElementById('status-message');
+
+        // アプリ起動時の初期セットアップ
+        function setupGame() {
+            gridContainer.innerHTML = '';
+            gridData = [];
+            isPlaying = false;
+            isWaitingStart = true;
+            timeLeft = 30.00;
+            timerDisplay.textContent = "30.00s";
+            statusMessage.textContent = 'PRESS SPACE TO START';
+            statusMessage.style.color = '#00ff66';
+
+            // 1. 基本となるグリッドデータをランダム英数字で埋める
+            for (let r = 0; r < ROWS; r++) {
+                gridData[r] = [];
+                for (let c = 0; c < COLS; c++) {
+                    gridData[r][c] = getRandomChar();
+                    
+                    const cell = document.createElement('div');
+                    cell.id = `cell-${r}-${c}`;
+                    cell.className = 'cell';
+                    cell.textContent = gridData[r][c];
+                    gridContainer.appendChild(cell);
+                }
+            }
+
+            // 2. プレイヤーの枠内に表示する5文字のターゲット単語を生成
+            pA.word = generateRandomWord(WORD_LEN);
+            pB.word = generateRandomWord(WORD_LEN);
+
+            // 3. 背景に隠す「静止スポット」の座標を決定
+            pA.targetY = Math.floor(Math.random() * 4);
+            pA.targetX = Math.floor(Math.random() * (COLS - WORD_LEN + 1));
+            pA.locked = false;
+
+            pB.targetY = Math.floor(Math.random() * 4) + 5;
+            pB.targetX = Math.floor(Math.random() * (COLS - WORD_LEN + 1));
+            pB.locked = false;
+
+            // 4. 背景の静止スポットに、手元の文字を上書き焼き付け
+            for (let i = 0; i < WORD_LEN; i++) {
+                gridData[pA.targetY][pA.targetX + i] = pA.word[i];
+                gridData[pB.targetY][pB.targetX + i] = pB.word[i];
+                
+                document.getElementById(`cell-${pA.targetY}-${pA.targetX + i}`).textContent = pA.word[i];
+                document.getElementById(`cell-${pB.targetY}-${pB.targetX + i}`).textContent = pB.word[i];
+            }
+
+            // 5. プレイヤー操作枠の初期位置を設定
+            pA.x = 0;
+            pA.y = 0;
+            pB.x = COLS - WORD_LEN;
+            pB.y = 0;
+
+            createPlayerFrame(pA);
+            createPlayerFrame(pB);
+            updateFramePosition(pA);
+            updateFramePosition(pB);
+        }
+
+        // 定期的な切り替え時のピピッ音
+        function playBeep() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.value = 1500;
+                
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.04);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.04);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // 間違った位置で確定を押した際のエラー警告音
+        function playErrorSound() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.value = 130;
+                
+                gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.25);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // ゲーム開始
+        function startGame() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            isWaitingStart = false;
+            isPlaying = true;
+            statusMessage.textContent = '';
+
+            clearInterval(timerInterval);
+            clearInterval(shuffleInterval);
+
+            timerInterval = setInterval(updateTimer, 10);
+            shuffleInterval = setInterval(shuffleGrid, 250);
+        }
+
+        // ランダムな1文字を取得
+        function getRandomChar() {
+            return CHARS[Math.floor(Math.random() * CHARS.length)];
+        }
+
+        // 指定文字数のランダム文字列を生成
+        function generateRandomWord(len) {
+            let result = '';
+            for (let i = 0; i < len; i++) {
+                result += getRandomChar();
+            }
+            return result;
+        }
+
+        // 操作枠のDOM要素を生成
+        function createPlayerFrame(player) {
+            const frame = document.createElement('div');
+            frame.id = player.id;
+            frame.className = 'player-frame';
+            
+            for (let i = 0; i < WORD_LEN; i++) {
+                const fCell = document.createElement('div');
+                fCell.className = 'frame-cell';
+                fCell.textContent = player.word[i];
+                frame.appendChild(fCell);
+            }
+            gridContainer.appendChild(frame);
+        }
+
+        // 操作枠の位置を画面に反映 (gapを0にしたためマスの幅24pxのピクセル計算へ調整)
+        function updateFramePosition(player) {
+            const frame = document.getElementById(player.id);
+            if (!frame) return;
+            frame.style.left = `${player.x * 24 + 3}px`;
+            frame.style.top = `${player.y * 24 + 3}px`;
+        }
+
+        // 通常マスだけをランダムシャッフル
+        function shuffleGrid() {
+            if (!isPlaying) return;
+
+            playBeep();
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const isStaticA = (r === pA.targetY && c >= pA.targetX && c < pA.targetX + WORD_LEN);
+                    const isStaticB = (r === pB.targetY && c >= pB.targetX && c < pB.targetX + WORD_LEN);
+
+                    if (!isStaticA && !isStaticB) {
+                        gridData[r][c] = getRandomChar();
+                        const cell = document.getElementById(`cell-${r}-${c}`);
+                        if (cell) cell.textContent = gridData[r][c];
+                    }
+                }
+            }
+        }
+
+        // タイマー更新
+        function updateTimer() {
+            if (!isPlaying) return;
+            timeLeft -= 0.01;
+            if (timeLeft <= 0) {
+                timeLeft = 0;
+                gameOver(false);
+            }
+            timerDisplay.textContent = `${timeLeft.toFixed(2)}s`;
+        }
+
+        // ゲーム終了処理
+        function gameOver(isSuccess) {
+            isPlaying = false;
+            clearInterval(timerInterval);
+            clearInterval(shuffleInterval);
+
+            if (isSuccess) {
+                statusMessage.textContent = 'SUCCESS';
+                statusMessage.style.color = '#00ff66';
+            } else {
+                statusMessage.textContent = 'FAILED';
+                statusMessage.style.color = '#ff3333';
+            }
+
+            setTimeout(setupGame, 3000);
+        }
+
+        // キーボード入力の受付
+        window.addEventListener('keydown', (e) => {
+            if (isWaitingStart) {
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    startGame();
+                }
+                return;
+            }
+
+            if (!isPlaying) return;
+
+            let key = e.key.toLowerCase();
+
+            // --- 文字列Aの操作 (WASD) ---
+            if (!pA.locked) {
+                if (key === 'w' && pA.y > 0) pA.y--;
+                if (key === 's' && pA.y < ROWS - 1) pA.y++;
+                if (key === 'a' && pA.x > 0) pA.x--;
+                if (key === 'd' && pA.x < COLS - WORD_LEN) pA.x++;
+                if (key === 'w' || key === 's' || key === 'a' || key === 'd') {
+                    updateFramePosition(pA);
+                }
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    if (pA.x === pA.targetX && pA.y === pA.targetY) {
+                        pA.locked = true;
+                        document.getElementById(pA.id).classList.add('locked');
+                        checkClearCondition();
+                    } else {
+                        playErrorSound();
+                    }
+                }
+            }
+
+            // --- 文字列Bの操作 (矢印キー) ---
+            if (!pB.locked) {
+                if (e.key === 'ArrowUp' && pB.y > 0) pB.y--;
+                if (e.key === 'ArrowDown' && pB.y < ROWS - 1) pB.y++;
+                if (e.key === 'ArrowLeft' && pB.x > 0) pB.x--;
+                if (e.key === 'ArrowRight' && pB.x < COLS - WORD_LEN) pB.x++;
+                if (e.key.startsWith('Arrow')) {
+                    e.preventDefault();
+                    updateFramePosition(pB);
+                }
+                if (e.key === 'Enter') {
+                    if (pB.x === pB.targetX && pB.y === pB.targetY) {
+                        pB.locked = true;
+                        document.getElementById(pB.id).classList.add('locked');
+                        checkClearCondition();
+                    } else {
+                        playErrorSound();
+                    }
+                }
+            }
+        });
+
+        // 両方ロックされたか確認
+        function checkClearCondition() {
+            if (pA.locked && pB.locked) {
+                gameOver(true);
+            }
+        }
+
+        window.onload = setupGame;
+    </script>
+</body>
+</html>
