@@ -54,7 +54,7 @@
             display: grid;
             grid-template-columns: repeat(18, 24px);
             grid-template-rows: repeat(9, 24px);
-            gap: 0px; 
+            gap: 0px;
             background-color: #000;
             padding: 3px;
             border: 2px solid #222;
@@ -219,13 +219,13 @@
                 osc.frequency.value = 1500;
                 
                 gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.04);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.035);
                 
                 osc.connect(gain);
                 gain.connect(audioCtx.destination);
                 
                 osc.start();
-                osc.stop(audioCtx.currentTime + 0.04);
+                osc.stop(audioCtx.currentTime + 0.035);
             } catch (e) {
                 console.error(e);
             }
@@ -265,7 +265,7 @@
             clearInterval(shuffleInterval);
 
             timerInterval = setInterval(updateTimer, 10);
-            shuffleInterval = setInterval(shuffleGrid, 250);
+            shuffleInterval = setInterval(shuffleGrid, 210);
         }
 
         function getRandomChar() {
